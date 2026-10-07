@@ -1,35 +1,36 @@
 # Voice Router
 
-Голосовой бот контакт-центра вымышленной страховой **Saqta Insurance**.
-HackAlem AI, трек Halyk Bank, кейс 2.
+A contact-center voice bot for the fictional insurance company **Saqta Insurance**.
+HackAlem AI, Halyk Bank track, case 2.
 
-Клиент говорит в микрофон по-русски, по-казахски или вперемешку. Бот понимает, что ему
-нужно, выбирает один из 40 сценариев, отвечает голосом и показывает супервизору, почему
-выбрал именно этот сценарий.
+The customer speaks into the microphone in Russian, Kazakh, or a mix of both. The bot
+understands what they need, picks one of 40 scenarios, answers by voice, and shows the
+supervisor why it chose that scenario.
 
-## Зачем
+## Why
 
-Обычно сценарий в голосовом роботе выбирает классификатор, обученный на фиксированных
-фразах. Он ломается, когда человек говорит как человек: меняет тему, просит что-то на
-стыке двух сценариев, переходит с русского на казахский посреди фразы.
+In a typical voice robot, the scenario is chosen by a classifier trained on fixed
+phrases. It breaks when people talk like people: they change the subject, ask for
+something on the border between two scenarios, or switch from Russian to Kazakh
+mid-sentence.
 
-Мы выбираем сценарий через LLM. Модель видит весь каталог и историю разговора, поэтому
-справляется с живой речью, а если не уверена, переспрашивает или зовёт оператора.
+We pick the scenario with an LLM. The model sees the whole catalog and the conversation
+history, so it handles natural speech, and when it is unsure, it asks a clarifying
+question or hands off to an operator.
 
-## Запуск
+## Running
 
-Нужны Docker и [just](https://github.com/casey/just).
+You need Docker and [just](https://github.com/casey/just).
 
 ```bash
 cp .env.example .env
 just up
 ```
 
-Интерфейс: http://localhost:3000, API и документация: http://localhost:8000/docs.
+UI: http://localhost:3000, API and docs: http://localhost:8000/docs.
 
-Без ключей проект запускается в демо-режиме: интерфейс работает, но вместо ответа модели
-вы увидите понятную ошибку (`llm_unavailable`). Чтобы включить настоящие модели, добавьте
-в `.env`:
+Without keys the project starts in demo mode: the UI works, but instead of a model
+answer you get a clear error (`llm_unavailable`). To enable real models, add to `.env`:
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -39,155 +40,161 @@ STT_PROVIDER=openai
 TTS_PROVIDER=openai
 ```
 
-и перезапустите `just up`. Тесты — `just test`, точность роутера — `just eval`.
+and run `just up` again. Tests: `just test`, router accuracy: `just eval`.
 
-## Как это работает
+## How it works
 
 ```mermaid
 flowchart LR
-    A[Микрофон] --> B[Распознавание]
-    B --> C[Роутер: выбор сценария]
-    C --> D[Исполнитель: данные клиента]
-    D --> E[Голосовой агент]
-    F[Фоновые агенты] <--> G[(Доска)]
+    A[Microphone] --> B[Speech recognition]
+    B --> C[Router: scenario choice]
+    C --> D[Executor: customer data]
+    D --> E[Voice agent]
+    F[Background agents] <--> G[(Blackboard)]
     E <--> G
-    E --> H[Озвучка]
+    E --> H[Text-to-speech]
     H --> A
 ```
 
-1. **Распознавание.** Клиент держит кнопку и говорит, отпускает — запись сразу уходит на
-   сервер и распознаётся (`gpt-4o-mini-transcribe`).
-2. **Роутер** — один запрос к LLM. В промпте все 40 сценариев целиком, с границами между
-   ними (`not_this_if`) дословно из кита. Ответ — строгий JSON: сценарий, уверенность,
-   причина, альтернативы, слоты. Уверенность ≥ 0.75 — работаем, 0.45–0.75 — переспрашиваем,
-   ниже дважды подряд — передаём оператору.
-3. **Исполнитель** достаёт данные: заявление по номеру, клиента по телефону, офисы по
-   городу. Каждый факт хранит ссылку на источник.
-4. **Голосовой агент** отвечает, используя только эти факты.
-5. **Озвучка** начинается с первого готового предложения, звук идёт в браузер кусками.
+1. **Recognition.** The customer holds the button and speaks; on release the recording
+   goes straight to the server and is transcribed (`gpt-4o-mini-transcribe`).
+2. **Router**: a single LLM request. The prompt contains all 40 scenarios in full, with
+   the boundaries between them (`not_this_if`) copied verbatim from the kit. The answer is
+   strict JSON: scenario, confidence, reason, alternatives, slots. Confidence ≥ 0.75 — we
+   proceed, 0.45–0.75 — we ask to clarify, below that twice in a row — we hand off to an
+   operator.
+3. **Executor** fetches data: a claim by number, a customer by phone, offices by city.
+   Every fact keeps a reference to its source.
+4. **Voice agent** answers using only those facts.
+5. **Text-to-speech** starts with the first ready sentence; audio streams to the browser
+   in chunks.
 
-### Голос не ждёт агентов
+### The voice doesn't wait for agents
 
-Это главное отличие от обычного конвейера «сначала все модели, потом ответ».
+This is the main difference from a typical "run all models first, then answer"
+pipeline.
 
-Голосовой агент отвечает короткими фрагментами и начинает говорить сразу. Параллельно
-фоновые агенты ищут по базе знаний и данным клиента и кладут найденное на общую доску.
-Перед каждым следующим фрагментом голосовой агент перечитывает доску и подхватывает то,
-что успело появиться. Кто не успел — попадёт в следующую реплику.
+The voice agent answers in short fragments and starts speaking immediately. In parallel,
+background agents search the knowledge base and customer data and put what they find on
+a shared blackboard. Before each next fragment, the voice agent re-reads the blackboard
+and picks up whatever has arrived. Anything that is late makes it into the next turn.
 
-Поиск по базе стартует одновременно с роутером, а сразу после распознавания звучит
-короткое «Секунду, проверяю». Время до первого звука не зависит ни от роутера, ни от
-того, сколько агентов работает за ним.
+The knowledge-base search starts at the same time as the router, and right after
+recognition the bot says a short "One moment, checking". Time to first sound depends
+neither on the router nor on how many agents run behind it.
 
-### Почему доска, а не цепочка вызовов
+### Why a blackboard rather than a chain of calls
 
-Типичный голосовой бот — это конвейер: распознать → классифицировать → сходить в базу →
-сгенерировать → озвучить. Каждый новый шаг добавляет задержку, а каждая новая логика —
-ещё одно звено. Доска устроена иначе, и это даёт несколько свойств, которые в конвейере
-получить трудно.
+A typical voice bot is a pipeline: recognize → classify → query the database → generate
+→ speak. Every new step adds latency, and every new piece of logic is one more link. A
+blackboard works differently, and that gives several properties that are hard to get in
+a pipeline.
 
-- **Добавить логику не значит замедлить ответ.** Агент — это запись в конфигурации: что
-  он читает с доски (`reads`), от чьих результатов зависит (`depends_on`), можно ли его
-  ждать и сколько (`blocking`, `deadline_ms`), нужна ли ему модель или хватит прямого
-  чтения данных (`mode: reader`). Новые агенты работают параллельно и не удлиняют путь до
-  первого звука.
-- **Устаревшее не попадает в ответ.** У каждой записи есть поколение звонка и ревизия
-  ввода. Клиент перебил или сменил тему — результаты агентов по старой реплике
-  отбрасываются сами, без специальной обработки в каждом сценарии.
-- **Бот знает, что клиент действительно услышал.** Браузер сообщает, до какого места
-  проиграл ответ. История хранит фрагменты как услышанные, услышанные частично или не
-  услышанные, и следующий ответ опирается на это, а не на то, что бот «сказал».
-- **Каждое утверждение прослеживается.** Для каждого фрагмента ответа записано, до какой
-  версии доски он её прочитал и на какие источники опирался. Супервизор видит не только
-  «что сказал бот», но и «на основании каких фактов, от какого агента и когда они пришли».
-- **Роутер и исполнитель тоже пишут на доску.** Сценарий, слоты, прерванные темы,
-  ожидающие подтверждения — всё это общее состояние. Поэтому возврат к прерванной теме,
-  переспрос и передача оператору с контекстом — не отдельные механизмы, а просто чтение
-  доски.
+- **Adding logic doesn't slow down the answer.** An agent is a config entry: what it
+  reads from the blackboard (`reads`), whose results it depends on (`depends_on`),
+  whether it can be waited for and for how long (`blocking`, `deadline_ms`), and whether
+  it needs a model or a direct data read is enough (`mode: reader`). New agents run in
+  parallel and don't lengthen the path to the first sound.
+- **Stale results don't reach the answer.** Every entry carries a call generation and an
+  input revision. If the customer interrupts or changes the subject, agent results for
+  the old utterance are dropped automatically, with no special handling in each
+  scenario.
+- **The bot knows what the customer actually heard.** The browser reports how far the
+  answer was played. The history stores fragments as heard, partially heard, or not
+  heard, and the next answer relies on that, not on what the bot "said".
+- **Every statement is traceable.** For each answer fragment we record which blackboard
+  version it read and which sources it relied on. The supervisor sees not just "what the
+  bot said" but "based on which facts, from which agent, and when they arrived".
+- **The router and executor write to the blackboard too.** Scenario, slots, interrupted
+  topics, pending confirmations are all shared state. So returning to an interrupted
+  topic, asking to clarify, and handing off to an operator with context are not separate
+  mechanisms, just blackboard reads.
 
-Отсюда практический вывод: под новую компанию или отрасль меняется каталог сценариев и
-набор агентов, а не код ядра.
+The practical upshot: for a new company or industry you change the scenario catalog and
+the set of agents, not the core code.
 
-## Для супервизора
+## For the supervisor
 
-После каждой реплики в панели видно: что распознано, какой сценарий выбран и почему,
-альтернативы с уверенностью, извлечённые данные, факты с источниками и время каждого
-этапа. Вся история звонка хранится в базе, её можно открыть по ID сессии
-(`/traces/sessions/{id}`), включая токены по каждой модели.
+After each turn the panel shows: what was recognized, which scenario was chosen and why,
+alternatives with confidence, extracted data, facts with sources, and the timing of each
+stage. The full call history is stored in the database and can be opened by session ID
+(`/traces/sessions/{id}`), including tokens per model.
 
-## Результаты
+## Results
 
-**Маршрутизация.** На 63 своих репликах (не из dev-набора): 62 из 62 верно, по-русски,
-по-казахски и вперемешку. Среди них ловушки на границах сценариев, смена темы, попытка
-заставить бота «одобрить выплату», вопросы не по теме. Цифры `just eval` на dev-наборе —
-TODO, прогоним перед демо.
+**Routing.** On 63 of our own utterances (not from the dev set): 62 of 62 correct, in
+Russian, Kazakh, and mixed. They include traps on scenario boundaries, topic switches,
+attempts to make the bot "approve a payout", and off-topic questions. `just eval` numbers
+on the dev set are TODO, to be run before the demo.
 
-**Скорость** (живые замеры, `gpt-4.1-mini`):
+**Speed** (live measurements, `gpt-4.1-mini`):
 
-| | сейчас | цель кейса |
+| | now | case target |
 |---|---|---|
-| выбор сценария | 1.5–2.0 с | 0.5 с |
-| первый звук после распознавания | десятки мс (подтверждение из кэша) | 1.5 с |
-| первое слово ответа по существу после выбора сценария | ~0.8–1.0 с | — |
+| scenario choice | 1.5–2.0 s | 0.5 s |
+| first sound after recognition | tens of ms (cached acknowledgement) | 1.5 s |
+| first substantive word after scenario choice | ~0.8–1.0 s | — |
 
-## Правила, которые бот не нарушает
+## Rules the bot doesn't break
 
-- Факты только из данных, у каждого есть источник. Модель формулирует, но не выдумывает.
-- Ничего необратимого без явного подтверждения клиента.
-- Не обещает выплату, возврат денег или выпуск полиса — передаёт оператору вместе с
-  контекстом разговора.
-- Если не уверен — переспрашивает, а не угадывает.
+- Facts only from data, each with a source. The model phrases, it doesn't invent.
+- Nothing irreversible without the customer's explicit confirmation.
+- Never promises a payout, a refund, or a policy issuance — hands off to an operator
+  together with the conversation context.
+- When unsure, it asks instead of guessing.
 
-## Ограничения
+## Limitations
 
-- Роутер пока медленнее цели в 0.5 с.
-- С включёнными моделями реплики клиента уходят в OpenAI. Данные в ките выдуманные, но
-  для реального контакт-центра нужна маскировка персональных данных или своя модель.
-- Нет быстрого пути для очевидных запросов: каждая реплика идёт через LLM.
-- SMS и перевод на оператора — заглушки.
-- Один процесс backend: незавершённый ход не переживает перезапуск (история — переживает).
-- Казахский мы проверяли сами, не с носителем языка.
+- The router is still slower than the 0.5 s target.
+- With models enabled, customer utterances are sent to OpenAI. The kit data is fictional,
+  but a real contact center would need PII masking or a self-hosted model.
+- No fast path for obvious requests: every utterance goes through the LLM.
+- SMS and operator handoff are stubs.
+- Single backend process: an unfinished turn doesn't survive a restart (the history
+  does).
+- We tested Kazakh ourselves, not with a native speaker.
 
-## Что дальше
+## What's next
 
-- Быстрый путь для очевидных фраз, LLM — только для сложных. Дешевле и быстрее.
-- Телефония вместо браузера.
-- Аналитика для супервизора: где бот переспрашивает и ошибается, что поправить в каталоге.
-- Другие компании и отрасли: каталог сценариев — это данные, его можно менять через
-  `/kit` без разработчика.
-- Своя модель для компаний, которым нельзя отправлять данные наружу.
+- A fast path for obvious phrases, LLM only for hard ones. Cheaper and faster.
+- Telephony instead of the browser.
+- Supervisor analytics: where the bot asks again or makes mistakes, what to fix in the
+  catalog.
+- Other companies and industries: the scenario catalog is data and can be edited via
+  `/kit` without a developer.
+- A self-hosted model for companies that can't send data outside.
 
-## Устройство репозитория
+## Repository layout
 
 ```
 backend/app/     call, speech, router, executor, kernel, context, knowledge, tracer
-frontend/src/    экран звонка, история, каталог сценариев, трассировка
-datasets/        стартовый кит, не меняем
-docs/adr/        архитектурные решения
-docs/specs/      спецификации модулей
+frontend/src/    call screen, history, scenario catalog, tracing
+datasets/        starter kit, unchanged
+docs/adr/        architecture decisions
+docs/specs/      module specifications
 ```
 
-Решения — в [`docs/adr/`](docs/adr/), главная спецификация —
-[`docs/specs/voice-router-spec.md`](docs/specs/voice-router-spec.md), правила работы
-команды — в [`AGENTS.md`](AGENTS.md).
+Decisions are in [`docs/adr/`](docs/adr/), the main specification is
+[`docs/specs/voice-router-spec.md`](docs/specs/voice-router-spec.md), and team working
+rules are in [`AGENTS.md`](AGENTS.md).
 
-## Технологии и подходы
+## Technologies and approaches
 
-**Стек**
+**Stack**
 - Backend: Python 3.13, FastAPI, Pydantic v2, SQLAlchemy async, Alembic, uv
 - Frontend: Next.js (App Router), React, TypeScript, Web Audio API, MediaRecorder
-- Данные: PostgreSQL + pgvector, полнотекстовый и триграммный поиск
-- Модели (OpenAI): `gpt-4.1-mini` — роутер и ответ, `gpt-4o-mini-transcribe` / `gpt-4o-transcribe` — распознавание, `gpt-4o-mini-tts` — озвучка, `text-embedding-3-large` — поиск
-- Инфраструктура: Docker Compose, just, OpenTelemetry
+- Data: PostgreSQL + pgvector, full-text and trigram search
+- Models (OpenAI): `gpt-4.1-mini` — router and answer, `gpt-4o-mini-transcribe` / `gpt-4o-transcribe` — recognition, `gpt-4o-mini-tts` — speech, `text-embedding-3-large` — search
+- Infrastructure: Docker Compose, just, OpenTelemetry
 
-**Подходы**
-- LLM-роутер вместо классификатора: весь каталог в промпте, строгий JSON-ответ, пороги уверенности, переспрос и передача оператору
-- Blackboard-архитектура: общее версионированное состояние звонка, голосовой агент и фоновые агенты работают параллельно
-- Сквозной стриминг: события хода по SSE, ответ фрагментами, озвучка PCM-кусками, подтверждение до роутера
-- Параллельная работа: поиск по базе идёт одновременно с роутером
-- Гибридный RAG: лексический поиск + векторный с объединением по рангу, расширения запросов для казахского
-- Кэш промпта роутера и кэш эмбеддингов/результатов поиска
-- Факты только из данных с `source_id`, подтверждение необратимых действий, маскировка персональных данных перед отправкой в модель
-- Трассировка каждого хода в формате OpenTelemetry: этапы, задержки, токены по моделям
-- Модульный backend со слоями и автоматической проверкой направления зависимостей
-- Режим без ключей: проект запускается и честно показывает, чего не хватает
+**Approaches**
+- LLM router instead of a classifier: the whole catalog in the prompt, strict JSON output, confidence thresholds, clarification and operator handoff
+- Blackboard architecture: shared versioned call state, the voice agent and background agents run in parallel
+- End-to-end streaming: turn events over SSE, answer in fragments, TTS in PCM chunks, acknowledgement before routing
+- Parallel work: knowledge-base search runs concurrently with the router
+- Hybrid RAG: lexical + vector search with rank fusion, query expansions for Kazakh
+- Router prompt cache and embedding/search result cache
+- Facts only from data with `source_id`, confirmation of irreversible actions, PII masking before sending to the model
+- OpenTelemetry tracing of every turn: stages, latencies, tokens per model
+- Modular backend with layers and automatic dependency-direction checks
+- Keyless mode: the project starts and honestly shows what is missing
